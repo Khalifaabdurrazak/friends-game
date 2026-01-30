@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Group Superlative Awards</title>
+    <style>
+        :root { --wa-green: #25D366; --dark: #121b22; --card: #ffffff; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 500px; margin: auto; }
+        h1 { text-align: center; color: var(--dark); margin-bottom: 10px; }
+        .intro { text-align: center; font-size: 0.9rem; margin-bottom: 20px; color: #666; }
+        
+        .question-card { background: var(--card); padding: 20px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .question-text { font-weight: bold; font-size: 1.1rem; margin-bottom: 15px; display: block; }
+        
+        .name-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .name-btn { 
+            padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: white; 
+            cursor: pointer; font-size: 0.85rem; transition: 0.2s; 
+        }
+        .name-btn.selected { background: var(--wa-green); color: white; border-color: var(--wa-green); font-weight: bold; }
+        
+        .share-btn { 
+            width: 100%; padding: 18px; background: var(--wa-green); color: white; 
+            border: none; border-radius: 10px; font-size: 1.2rem; font-weight: bold; 
+            cursor: pointer; margin-top: 20px; box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+        }
+        .share-btn:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🏆 Group Awards</h1>
+    <p class="intro">Cast your votes and share the results to the WhatsApp group!</p>
+    
+    <div id="quiz-area"></div>
+    
+    <button class="share-btn" onclick="shareToWhatsApp()">📲 Send Results to Group</button>
+</div>
+
+<script>
+    const members = [
+        "Abdurrazak", "Fauziyah", "Opeyemi", "Kofoworola", "Oluwanifemi", "Zaynab"
+    ];
+
+    const questions = [
+        { q: "Who would forget their own birthday? 🎂", id: "birthday" },
+        { q: "Who would get lost using Google Maps? 🗺️", id: "maps" },
+        { q: "Who would laugh during a serious moment? 😭😂", id: "laugh" },
+        { q: "Who checks their phone every 2 minutes? 📱", id: "phone" },
+        { q: "Who would eat food meant for everyone? 🍗", id: "food" },
+        { q: "Who would sleep through an alarm? ⏰", id: "sleep" },
+        { q: "Who would say 'I’m coming' and arrive late? 🚶‍♂️", id: "late" },
+        { q: "Who would forget why they entered a room? 🤔", id: "room" },
+        { q: "Who would panic first in a small problem? 😱", id: "panic" },
+        { q: "Who acts serious but is actually funny? 😎➡️😂", id: "funny" }
+    ];
+
+    const userVotes = {};
+
+    function renderQuiz() {
+        const container = document.getElementById('quiz-area');
+        questions.forEach((item, index) => {
+            const card = document.createElement('div');
+            card.className = 'question-card';
+            card.innerHTML = `<span class="question-text">${item.q}</span>`;
+            
+            const grid = document.createElement('div');
+            grid.className = 'name-grid';
+            
+            members.forEach(name => {
+                const btn = document.createElement('button');
+                btn.className = 'name-btn';
+                btn.innerText = name;
+                btn.onclick = () => {
+                    // Update selection logic
+                    userVotes[item.id] = name;
+                    Array.from(grid.children).forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                };
+                grid.appendChild(btn);
+            });
+            
+            card.appendChild(grid);
+            container.appendChild(card);
+        });
+    }
+
+    function shareToWhatsApp() {
+        if (Object.keys(userVotes).length < questions.length) {
+            alert("Please vote for everyone before sharing!");
+            return;
+        }
+
+        let message = "📊 *MY GROUP AWARD NOMINATIONS* \n\n";
+        questions.forEach(item => {
+            message += `🔹 *${item.q}*\n👉 Winner: _${userVotes[item.id]}_\n\n`;
+        });
+        message += "Voted by: Me \nClick the link to vote: [YOUR_URL_HERE]";
+
+        const encodedMessage = encodeURIComponent(message);
+        window.open(`https://wa.me/?text=${encodedMessage}`);
+    }
+
+    renderQuiz();
+</script>
+
+</body>
+</html>
