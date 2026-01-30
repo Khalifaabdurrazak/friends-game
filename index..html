@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Most Likely To - Friends Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f9; margin: 0; }
+        h1, h2 { color: #333; }
+        button { padding: 15px 25px; margin: 10px; font-size: 20px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        .player-button { display: block; width: 85%; max-width: 400px; margin: 15px auto; padding: 25px; font-size: 28px; background: #e3f2fd; border: 3px solid #2196f3; border-radius: 12px; }
+        .player-button.selected { background: #fff59d; border-color: #fbc02d; }
+        .progress-container mời { margin: 20px auto; width: 85%; max-width: 500px; text-align: left; }
+        .progress-bar-bg { background: #ddd; height: 40px; border-radius: 8px; overflow: hidden; }
+        .progress-bar { background: #4caf50; height: 100%; width: 0; transition: width 0.4s; color: white; line-height: 40px; text-align: center; font-weight: bold; }
+        #adminControls { background: #fff8e1; padding: 20px; border: 2px solid #ffca28; border-radius: 10px; margin: 20px auto; max-width: 600px; }
+        input { padding: 12px; width: 80%; max-width: 500px; font-size: 18px; margin: 10px; }
+        #revealText { font-size: 32px; margin: 30px; }
+        #personalText { font-size: 48px; color: #d32f2f; margin: 20px; }
+        #timer { font-size: 36px; font-weight: bold; color: #d32f2f; margin: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="joinScreen">
+    <h1>Most Likely To</h1>
+    <p>Select your name to join:</p>
+    <select id="nameSelect" style="padding:10px; font-size:18px;"></select><br><br>
+    <button id="joinBtn">Join Game</button>
+</div>
+
+<div id="waitingScreen" style="display:none">
+    <h1>Waiting for admin to start...</h1>
+    <div id="joinedPlayers"></div>
+</div>
+
+<div id="votingScreen" style="display:none">
+    <h2 id="currentQuestion"></h2>
+    <div id="timer">--</div>
+    <div id="voteButtons"></div>
+    <h3>Live Votes</h3>
+    <div id="progressBars"></div>
+</div>
+
+<div id="revealScreen" style="display:none">
+    <h1 id="revealText"></h1>
+    <h2 id="personalText"></h2>
+    <div id="adminNext" style="display:none; margin-top:50px;">
+        <button id="newRoundBtn">Start New Round</button><br><br>
+        <button id="shareBtn">Share Result to WhatsApp Group</button>
+    </div>
+</div>
+
+<div id="adminControls" style="display:none">
+    <h2>Admin Control</h2>
+    <input id="questionInput" placeholder="Who is most likely to..."><br><br>
+    <button id="startRoundBtn">Start Round</button>
+</div>
+
+<script>
+    // ==== EDIT THESE ====
+    const PLAYER_NAMES = ["Zaynab", "Opeyemi", "Friend3", "Friend4", "Friend5", "Friend6"]; // ← CHANGE TO YOUR 6 NAMES
+    const DURATION = 45; // seconds
+    const ADMIN_SECRET = "cyberkalitheadmin"; // ← CHANGE TO YOUR SECRET
+    const SUPABASE_URL = "https://hfvkogevgapyjnmanbmh.supabase.co"; // ← YOUR SUPABASE URL
+    const SUPABASE_ANON_KEY = "sb_publishable_MJUzJ-XS272Vmb4gD8sbBQ_1RJ9bq3N"; // ← YOUR ANON KEY
+    // ====================
+
+    const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const channel = supabase.channel('game-channel');
+
+    let myName = localStorage.getItem('myName');
+    let isAdmin = false;
+    let currentQuestion = null;
+    let startTime = null;
+    let votes = {};
+    let takenNames = [];
+
+    // Admin check
+    const params = new URLSearchParams(location.search);
+    if (params.get('admin') === ADMIN_SECRET) {
+        isAdmin = true;
+        document.getElementById('adminControls').style.display = 'block';
+    }
+
+    // Presence & realtime setup
+    channel
+        .on('presence', { event: 'sync' }, () => {
+            const state = channel.presenceState();
+            takenNames = [];
+            Object.values(state).forEach(presences => {
+                presences.forEach(p => {
+                    if (p.name) takenNames.push(p.name);
+                });
+            });
+            takenNames = [...new Set(takenNames)];
+            updateNameSelect();
+            updateJoinedPlayers();
+            updateProgressBars();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'votes' }, (payload) => {
+            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+                votes[payload.new.voter] = payload.new.target;
+            } else if (payload.eventType === 'DELETE') {
+                delete votes[payload.old.voter];
+            }
+            updateVoteButtons();
+            updateProgressBars();
+            updateView();
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'game_state' }, (payload) => {
+            if (payload.new.id === 1) {
+                currentQuestion = payload.new.question || null;
+                startTime = payload.new.start_time || null;
+                updateView();
+            }
+        })
+        .subscribe();
+
+    // Load initial game state
+    async function loadGameState() {
+        const { data } = await supabase.from('game_state').select('*').eq('id', 1).maybeSingle();
+        if (data) {
+            currentQuestion = data.question;
+            startTime = data.start_time;
+        }
+        updateView();
+    }
+
+    // Load initial votes
+    async function loadVotes() {
+        const { data } = await supabase.from('votes').select('voter, target');
+        votes = {};
+        if (data) data.forEach(row => votes[row.voter] = row.target);
+        updateProgressBars();
+        updateVoteButtons();
+    }
+
+    // Join game
+    document.getElementById('joinBtn').onclick = async () => {
+        const name = document.getElementById('nameSelect').value;
+        if (!name || takenNames.includes(name)) return alert("Name already taken!");
+        const { error } = await channel.track({ name });
+        if (error) return alert("Failed to join");
+        myName = name;
+        localStorage.setItem('myName', myName);
+        showScreen('waitingScreen');
+    };
+
+    // Auto-rejoin if refreshed
+    window.onload = async () => {
+        updateNameSelect();
+        await loadGameState();
+        await loadVotes();
+        if (myName && PLAYER_NAMES.includes(myName) && !takenNames.includes(myName)) {
+            channel.track({ name: myName });
+        }
+    };
+
+    window.onbeforeunload = () => {
+        channel.untrack();
+    };
+
+    function updateNameSelect() {
+        const select = document.getElementById('nameSelect');
+        select.innerHTML = '';
+        PLAYER_NAMES.forEach(n => {
+            const opt = document.createElement('option');
+            opt.value = opt.textContent = n;
+            if (takenNames.includes(n)) opt.disabled = true;
+            select.add(opt);
+        });
+    }
+
+    function updateJoinedPlayers() {
+        document.getElementById('joinedPlayers').innerHTML = '<h3>Joined: ' + (takenNames.length ? takenNames.join(', ') : 'No one yet') + '</h3>';
+    }
+
+    function showScreen(id) {
+        ['joinScreen','waitingScreen','votingScreen','revealScreen'].forEach(s => document.getElementById(s).style.display = 'none');
+        document.getElementById(id).style.display = 'block';
+    }
+
+    function updateView() {
+        if (!myName) return;
+        if (!currentQuestion || !startTime) {
+            showScreen('waitingScreen');
+            return;
+        }
+        const timeLeft = Math.max(0, Math.ceil((startTime + DURATION * 1000 - Date.now()) / 1000));
+        document.getElementById('currentQuestion').textContent = currentQuestion;
+
+        if (timeLeft > 0) {
+            showScreen('votingScreen');
+            document.getElementById('timer').textContent = `Time left: ${timeLeft}s`;
+            createVoteButtons();
+        } else {
+            showScreen('revealScreen');
+            createVoteButtons();
+            computeAndShowWinner();
+            if (isAdmin) document.getElementById('adminNext').style.display = 'block';
+        }
+    }
+
+    function createVoteButtons() {
+        const container = document.getElementById('voteButtons');
+        if (container.dataset.built) return;
+        container.innerHTML = '';
+        PLAYER_NAMES.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'player-button';
+            btn.textContent = name;
+            btn.onclick = async () => {
+                if (name === myName) return alert("No self-voting! 😏");
+                await supabase.from('votes').upsert({ voter: myName, target: name });
+            };
+            container.appendChild(btn);
+        });
+        container.dataset.built = true;
+        updateVoteButtons();
+    }
+
+    function updateVoteButtons() {
+        const buttons = document.querySelectorAll('.player-button');
+        const timeLeft = startTime ? Math.max(0, Math.ceil((startTime + DURATION * 1000 - Date.now()) / 1000)) : 0;
+        buttons.forEach((btn, i) => {
+            const name = PLAYER_NAMES[i];
+            btn.disabled = timeLeft === 0;
+            btn.classList.toggle('selected', votes[myName] === name);
+        });
+    }
+
+    function updateProgressBars() {
+        let container = document.getElementById('progressBars');
+        if (!container.innerHTML) {
+            container.innerHTML = '';
+            PLAYER_NAMES.forEach(name => {
+                container.innerHTML += `
+                    <div class="progress-container">
+                        <div><strong>${name}</strong>: <span class="count">0</span> votes</div>
+                        <div class="progress-bar-bg"><div class="progress-bar">0%</div></div>
+                    </div>`;
+            });
+        }
+        const counts = {};
+        PLAYER_NAMES.forEach(n => counts[n] = 0);
+        Object.values(votes).forEach(v => counts[v] ? counts[v]++ : null);
+        const total = takenNames.length || 1;
+        container.querySelectorAll('.progress-container').forEach((el, i) => {
+            const name = PLAYER_NAMES[i];
+            const count = counts[name];
+            const percent = total > 0 ? (count / total) * 100 : 0;
+            el.querySelector('.count').textContent = count;
+            el.querySelector('.progress-bar').style.width = percent + '%';
+            el.querySelector('.progress-bar').textContent = percent.toFixed(0) + '%';
+        });
+    }
+
+    function computeAndShowWinner() {
+        const counts = {};
+        PLAYER_NAMES.forEach(n => counts[n] = 0);
+        Object.values(votes).forEach(v => counts[v]++);
+        const maxCount = Math.max(...Object.values(counts));
+        const winners = PLAYER_NAMES.filter(n => counts[n] === maxCount);
+
+        let revealText = '';
+        let personalText = '';
+        let doConfetti = false;
+
+        if (maxCount === 0) {
+            revealText = 'No votes yet!';
+        } else if (winners.length === 1) {
+            revealText = `The winner of "${currentQuestion}" is...\n${winners[0].toUpperCase()}!`;
+            if (myName === winners[0]) {
+                personalText = 'CONGRATULATIONS!\nYOU WON! 🎉🎉';
+                doConfetti = true;
+            }
+        } else {
+            let list = winners.slice(0, -1).join(', ');
+            if (winners.length > 2) list += ',';
+            list += ' and ' + winners[winners.length - 1];
+            revealText = `It's a TIE between ${list}!`;
+            if (winners.includes(myName)) {
+                personalText = 'YOU TIED FOR FIRST! 🎉';
+                doConfetti = true;
+            }
+        }
+
+        document.getElementById('revealText').textContent = revealText;
+        document.getElementById('personalText').textContent = personalText;
+
+        if (doConfetti) {
+            confetti({ particleCount: 300, spread: 100, origin: { y: 0.6 } });
+        }
+    }
+
+    // Admin actions
+    if (isAdmin) {
+        document.getElementById('startRoundBtn').onclick = async () => {
+            const q = document.getElementById('questionInput').value.trim();
+            if (!q) return alert("Enter a question!");
+            const now = Date.now();
+            await supabase.from('game_state').update({ question: q, start_time: now }).eq('id', 1);
+            await supabase.from('votes').delete(); // clears all votes
+            document.getElementById('questionInput').value = '';
+        };
+        document.getElementById('newRoundBtn').onclick = async () => {
+            await supabase.from('game_state').update({ question: null, start_time: null }).eq('id', 1);
+        };
+        document.getElementById('shareBtn').onclick = () => {
+            const resultText = document.getElementById('revealText').textContent;
+            const text = `Most Likely To Result 🔥\n\n"${currentQuestion}"\n\n${resultText}\n\nThe group has spoken! 😂`;
+            window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`);
+        };
+    }
+</script>
+</body>
+</html>
