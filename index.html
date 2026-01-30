@@ -10,15 +10,25 @@
         body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f9; margin: 0; }
         h1, h2 { color: #333; }
         button { padding: 15px 25px; margin: 10px; font-size: 20px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; }
-        button:disabled { background: #ccc; }
-        .player-button { display: block; width: 85%; max-width: 400px; margin: 15px auto; padding: 25px; font-size: 28px; background: #e3f2fd; border: 3px solid #2196f3; border-radius: 12px; }
+        button:disabled { background: #ccc; opacity: 0.6; cursor: not-allowed; }
+        .player-button { 
+            display: block; width: 85%; max-width: 400px; margin: 15px auto; padding: 25px; font-size: 24px; 
+            background: #e3f2fd; border: 3px solid #2196f3; border-radius: 12px; cursor: pointer;
+            white-space: normal; word-break: break-word;
+        }
+        .player-button:disabled { background: #bbb; border-color: #999; color: #666; }
         .player-button.selected { background: #fff59d; border-color: #fbc02d; }
-        .progress-container mời { margin: 20px auto; width: 85%; max-width: 500px; text-align: left; }
+        .progress-container { 
+            margin: 20px auto; width: 85%; max-width: 500px; text-align: left; 
+        }
+        .progress-container > div:first-child { 
+            white-space: normal; word-break: break-word; font-size: 18px; 
+        }
         .progress-bar-bg { background: #ddd; height: 40px; border-radius: 8px; overflow: hidden; }
         .progress-bar { background: #4caf50; height: 100%; width: 0; transition: width 0.4s; color: white; line-height: 40px; text-align: center; font-weight: bold; }
         #adminControls { background: #fff8e1; padding: 20px; border: 2px solid #ffca28; border-radius: 10px; margin: 20px auto; max-width: 600px; }
         input { padding: 12px; width: 80%; max-width: 500px; font-size: 18px; margin: 10px; }
-        #revealText { font-size: 32px; margin: 30px; }
+        #revealText { font-size: 32px; margin: 30px; white-space: pre-line; }
         #personalText { font-size: 48px; color: #d32f2f; margin: 20px; }
         #timer { font-size: 36px; font-weight: bold; color: #d32f2f; margin: 20px; }
     </style>
@@ -27,14 +37,15 @@
 
 <div id="joinScreen">
     <h1>Most Likely To</h1>
-    <p>Select your name to join:</p>
-    <select id="nameSelect" style="padding:10px; font-size:18px;"></select><br><br>
-    <button id="joinBtn">Join Game</button>
+    <p>Tap your name to join:</p>
+    <div id="nameButtons"></div>
+    <button onclick="location.reload()">Refresh List</button>
 </div>
 
 <div id="waitingScreen" style="display:none">
     <h1>Waiting for admin to start...</h1>
     <div id="joinedPlayers"></div>
+    <button onclick="location.reload()">Refresh</button>
 </div>
 
 <div id="votingScreen" style="display:none">
@@ -61,13 +72,13 @@
 </div>
 
 <script>
-    // ==== EDIT THESE ====
-    const PLAYER_NAMES = ["abdurrazak zikirullahi Khalifa", "Tijani Fauziyah omolola", "Sulaimon quadri Opeyemi", "Ibrahim Aleeyat Kofoworola", "Olarinde zaynab omotolani", "Oluwanifemi", "Ibrahim Abdulrazak", "abdullahi"]; // ← CHANGE TO YOUR 6 NAMES
+    // ==== EDIT THESE IF NEEDED ====
+    const PLAYER_NAMES = ["abdurrazak zikirullahi Khalifa", "Tijani Fauziyah omolola", "Sulaimon quadri Opeyemi", "Ibrahim Aleeyat Kofoworola", "Olarinde zaynab omotolani", "Oluwanifemi", "Ibrahim Abdulrazak", "abdullahi"];
     const DURATION = 45; // seconds
-    const ADMIN_SECRET = "cyberkalitheadmin"; // ← CHANGE TO YOUR SECRET
-    const SUPABASE_URL = "https://hfvkogevgapyjnmanbmh.supabase.co"; // ← YOUR SUPABASE URL
-    const SUPABASE_ANON_KEY = "sb_publishable_MJUzJ-XS272Vmb4gD8sbBQ_1RJ9bq3N"; // ← YOUR ANON KEY
-    // ====================
+    const ADMIN_SECRET = "cyberkalitheadmin";
+    const SUPABASE_URL = "https://hfvkogevgapyjnmanbmh.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_MJUzJ-XS272Vmb4gD8sbBQ_1RJ9bq3N";
+    // ===============================
 
     const supabase = Supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const channel = supabase.channel('game-channel');
@@ -86,7 +97,7 @@
         document.getElementById('adminControls').style.display = 'block';
     }
 
-    // Presence & realtime setup
+    // Realtime listeners
     channel
         .on('presence', { event: 'sync' }, () => {
             const state = channel.presenceState();
@@ -97,7 +108,7 @@
                 });
             });
             takenNames = [...new Set(takenNames)];
-            updateNameSelect();
+            updateJoinButtons();
             updateJoinedPlayers();
             updateProgressBars();
         })
@@ -120,7 +131,7 @@
         })
         .subscribe();
 
-    // Load initial game state
+    // Initial data load
     async function loadGameState() {
         const { data } = await supabase.from('game_state').select('*').eq('id', 1).maybeSingle();
         if (data) {
@@ -130,48 +141,54 @@
         updateView();
     }
 
-    // Load initial votes
     async function loadVotes() {
-        const { data } = await supabase.from('votes').select('voter, target');
+        const { 
+data } = await supabase.from('votes').select('voter, target');
         votes = {};
         if (data) data.forEach(row => votes[row.voter] = row.target);
         updateProgressBars();
         updateVoteButtons();
     }
 
-    // Join game
-    document.getElementById('joinBtn').onclick = async () => {
-        const name = document.getElementById('nameSelect').value;
-        if (!name || takenNames.includes(name)) return alert("Name already taken!");
-        const { error } = await channel.track({ name });
-        if (error) return alert("Failed to join");
-        myName = name;
-        localStorage.setItem('myName', myName);
-        showScreen('waitingScreen');
-    };
-
-    // Auto-rejoin if refreshed
+    // Auto-rejoin + initial setup
     window.onload = async () => {
-        updateNameSelect();
+        updateJoinButtons(); // build name buttons
         await loadGameState();
         await loadVotes();
         if (myName && PLAYER_NAMES.includes(myName) && !takenNames.includes(myName)) {
-            channel.track({ name: myName });
+            await channel.track({ name: myName });
+            showScreen('waitingScreen');
+        } else if (myName) {
+            showScreen('waitingScreen');
         }
     };
 
-    window.onbeforeunload = () => {
-        channel.untrack();
-    };
+    window.onbeforeunload = () => channel.untrack();
 
-    function updateNameSelect() {
-        const select = document.getElementById('nameSelect');
-        select.innerHTML = '';
-        PLAYER_NAMES.forEach(n => {
-            const opt = document.createElement('option');
-            opt.value = opt.textContent = n;
-            if (takenNames.includes(n)) opt.disabled = true;
-            select.add(opt);
+    // Big tappable name buttons for joining
+    function updateJoinButtons() {
+        const container = document.getElementById('nameButtons');
+        if (!container.dataset.built) {
+            container.innerHTML = '';
+            PLAYER_NAMES.forEach(name => {
+                const btn = document.createElement('button');
+                btn.className = 'player-button';
+                btn.textContent = name;
+                btn.onclick = async () => {
+                    if (takenNames.includes(name)) return;
+                    const { error } = await channel.track({ name });
+                    if (error) return alert("Failed to join - try again");
+                    myName = name;
+                    localStorage.setItem('myName', myName);
+                    showScreen('waitingScreen');
+                };
+                container.appendChild(btn);
+            });
+            container.dataset.built = true;
+        }
+        // Always update disabled state
+        container.querySelectorAll('.player-button').forEach(btn => {
+            btn.disabled = takenNames.includes(btn.textContent);
         });
     }
 
@@ -185,7 +202,10 @@
     }
 
     function updateView() {
-        if (!myName) return;
+        if (!myName) {
+            showScreen('joinScreen');
+            return;
+        }
         if (!currentQuestion || !startTime) {
             showScreen('waitingScreen');
             return;
@@ -199,7 +219,7 @@
             createVoteButtons();
         } else {
             showScreen('revealScreen');
-            createVoteButtons();
+            createVoteButtons(); // keep buttons visible but disabled
             computeAndShowWinner();
             if (isAdmin) document.getElementById('adminNext').style.display = 'block';
         }
@@ -224,7 +244,7 @@
     }
 
     function updateVoteButtons() {
-        const buttons = document.querySelectorAll('.player-button');
+        const buttons = document.querySelectorAll('#voteButtons .player-button');
         const timeLeft = startTime ? Math.max(0, Math.ceil((startTime + DURATION * 1000 - Date.now()) / 1000)) : 0;
         buttons.forEach((btn, i) => {
             const name = PLAYER_NAMES[i];
@@ -247,12 +267,12 @@
         }
         const counts = {};
         PLAYER_NAMES.forEach(n => counts[n] = 0);
-        Object.values(votes).forEach(v => counts[v] ? counts[v]++ : null);
-        const total = takenNames.length || 1;
+        Object.values(votes).forEach(v => counts[v]++);
+        const totalVotes = Object.keys(votes).length || 1;
         container.querySelectorAll('.progress-container').forEach((el, i) => {
             const name = PLAYER_NAMES[i];
             const count = counts[name];
-            const percent = total > 0 ? (count / total) * 100 : 0;
+            const percent = (count / totalVotes) * 100;
             el.querySelector('.count').textContent = count;
             el.querySelector('.progress-bar').style.width = percent + '%';
             el.querySelector('.progress-bar').textContent = percent.toFixed(0) + '%';
@@ -273,7 +293,7 @@
         if (maxCount === 0) {
             revealText = 'No votes yet!';
         } else if (winners.length === 1) {
-            revealText = `The winner of "${currentQuestion}" is...\n${winners[0].toUpperCase()}!`;
+            revealText = `The winner of "${currentQuestion}" is...\n${winners[0]}!`;
             if (myName === winners[0]) {
                 personalText = 'CONGRATULATIONS!\nYOU WON! 🎉🎉';
                 doConfetti = true;
@@ -297,14 +317,14 @@
         }
     }
 
-    // Admin actions
+    // Admin controls
     if (isAdmin) {
         document.getElementById('startRoundBtn').onclick = async () => {
             const q = document.getElementById('questionInput').value.trim();
             if (!q) return alert("Enter a question!");
             const now = Date.now();
             await supabase.from('game_state').update({ question: q, start_time: now }).eq('id', 1);
-            await supabase.from('votes').delete(); // clears all votes
+            await supabase.from('votes').delete();
             document.getElementById('questionInput').value = '';
         };
         document.getElementById('newRoundBtn').onclick = async () => {
